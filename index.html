@@ -3,96 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Speedo Offline</title>
-    <link rel="manifest" href='data:application/json,{"name":"Speedo","short_name":"Speedo","start_url":".","display":"standalone","background_color":"#0f172a","theme_color":"#38bdf8","icons":[{"src":"https://cdn-icons-png.flaticon.com/512/3754/3754433.png","sizes":"512x512","type":"image/png"}]}'>
+    <title>Speedo TGV Mode</title>
     <style>
         :root { --bg: #0f172a; --accent: #38bdf8; --text: #f8fafc; }
-        body {
-            margin: 0; background: var(--bg); color: var(--text);
-            font-family: sans-serif; display: flex; flex-direction: column;
-            align-items: center; justify-content: center; height: 100vh; overflow: hidden;
-        }
-        #speed { font-size: 10rem; font-weight: 800; color: var(--accent); margin: 0; }
-        .unit { font-size: 1.5rem; opacity: 0.7; letter-spacing: 2px; }
-        .info-box {
-            background: rgba(255,255,255,0.05); padding: 15px 30px;
-            border-radius: 12px; margin-top: 20px; text-align: center;
-        }
-        #status { font-size: 0.8rem; margin-top: 10px; transition: color 0.3s; }
-        .online { color: #22c55e; }
-        .offline { color: #f59e0b; }
-        button {
-            background: var(--accent); border: none; padding: 15px 30px;
-            border-radius: 30px; font-weight: bold; cursor: pointer;
-        }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        #speed { font-size: 8rem; font-weight: 800; color: var(--accent); margin: 0; text-align: center; }
+        .unit { font-size: 1.5rem; opacity: 0.7; letter-spacing: 2px; margin-bottom: 20px;}
+        .info-box { background: rgba(255,255,255,0.05); padding: 15px 30px; border-radius: 12px; text-align: center; margin-bottom: 10px; width: 80%; max-width: 300px; }
+        .small-text { font-size: 0.7rem; opacity: 0.6; margin-bottom: 5px; }
+        .value { font-weight: bold; font-size: 1.2rem; }
+        button { background: var(--accent); color: var(--bg); border: none; padding: 15px 30px; border-radius: 30px; font-weight: bold; cursor: pointer; font-size: 1.1rem; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
     <div id="start-screen">
-        <button onclick="init()">DÉMARRER LE COMPTEUR</button>
+        <button onclick="init()">Démarrer le Compteur</button>
     </div>
 
     <div id="app" class="hidden">
         <div id="speed">0</div>
         <div class="unit">KM/H</div>
+        
         <div class="info-box">
-            <div style="font-size: 0.7rem; opacity: 0.6;">PRÉCISION GPS</div>
-            <div id="acc">--</div>
+            <div class="small-text">PRÉCISION DU SIGNAL</div>
+            <div id="acc" class="value">--</div>
         </div>
-        <div id="status">Vérification connexion...</div>
+        
+        <div class="info-box">
+            <div class="small-text">MODE DE CALCUL</div>
+            <div id="calc-mode" class="value" style="color: #f59e0b;">En attente...</div>
+        </div>
     </div>
 
     <script>
-        // 1. GESTION DU MODE HORS-LIGNE (SERVICE WORKER "AUTO-GÉNÉRÉ")
-        if ('serviceWorker' in navigator) {
-            const swCode = `
-                const CACHE_NAME = 'speedo-v1';
-                self.addEventListener('install', e => {
-                    e.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(['./'])));
-                });
-                self.addEventListener('fetch', e => {
-                    e.respondWith(caches.match(e.request).then(res => res || fetch(e.request)));
-                });
-            `;
-            const blob = new Blob([swCode], { type: 'text/javascript' });
-            navigator.serviceWorker.register(URL.createObjectURL(blob));
+        let lastPosition = null;
+        let speedHistory = [];
+        const HISTORY_SIZE = 5; // On fait la moyenne sur les 5 dernières mesures
+
+        // Formule mathématique de Haversine pour calculer la distance entre 2 points GPS
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Rayon de la terre en km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c; // Retourne la distance en kilomètres
         }
 
-        // 2. DÉTECTION DE LA CONNEXION
-        function updateOnlineStatus() {
-            const status = document.getElementById('status');
-            if (navigator.onLine) {
-                status.innerText = "● Mode Connecté";
-                status.className = "online";
-            } else {
-                status.innerText = "● Mode Hors-ligne (GPS actif)";
-                status.className = "offline";
-            }
-        }
-        window.addEventListener('online', updateOnlineStatus);
-        window.addEventListener('offline', updateOnlineStatus);
-
-        // 3. LOGIQUE DU COMPTEUR
         function init() {
             document.getElementById('start-screen').classList.add('hidden');
             document.getElementById('app').classList.remove('hidden');
-            updateOnlineStatus();
 
             if ("geolocation" in navigator) {
                 navigator.geolocation.watchPosition(
                     (pos) => {
-                        const s = pos.coords.speed;
-                        const a = pos.coords.accuracy;
+                        const accuracy = pos.coords.accuracy;
+                        document.getElementById('acc').innerText = `± ${Math.round(accuracy)} m`;
                         
-                        // Conversion m/s en km/h
-                        document.getElementById('speed').innerText = (s && s > 0.5) ? Math.round(s * 3.6) : 0;
-                        document.getElementById('acc').innerText = `± ${Math.round(a)} m`;
-                        document.getElementById('acc').style.color = a < 15 ? '#22c55e' : '#ef4444';
+                        let currentSpeed = 0;
+                        let mode = "";
+
+                        // Si la précision est acceptable et que l'appareil donne une vitesse
+                        if (accuracy < 100 && pos.coords.speed !== null) {
+                            currentSpeed = pos.coords.speed * 3.6;
+                            mode = "Vitesse GPS Directe";
+                            document.getElementById('calc-mode').style.color = "#22c55e";
+                        } 
+                        // Sinon, on calcule manuellement la vitesse avec la distance (Mode TGV/Dégradé)
+                        else if (lastPosition) {
+                            const distanceKm = calculateDistance(
+                                lastPosition.coords.latitude, lastPosition.coords.longitude,
+                                pos.coords.latitude, pos.coords.longitude
+                            );
+                            const timeHours = (pos.timestamp - lastPosition.timestamp) / 3600000;
+                            
+                            if (timeHours > 0) {
+                                currentSpeed = distanceKm / timeHours;
+                            }
+                            mode = "Calcul par Triangulation (Lissé)";
+                            document.getElementById('calc-mode').style.color = "#f59e0b";
+                        }
+
+                        // Lissage : on ajoute la vitesse au tableau
+                        if (currentSpeed > 0 || speedHistory.length > 0) {
+                            speedHistory.push(currentSpeed);
+                        }
+                        
+                        // On garde seulement les X dernières mesures
+                        if (speedHistory.length > HISTORY_SIZE) {
+                            speedHistory.shift();
+                        }
+
+                        // Calcul de la moyenne glissante
+                        if (speedHistory.length > 0) {
+                            const averageSpeed = speedHistory.reduce((a, b) => a + b) / speedHistory.length;
+                            
+                            // Sécurité anti-aberrations : on ignore les vitesses impossibles (> 400km/h)
+                            if (averageSpeed < 400) {
+                                document.getElementById('speed').innerText = Math.round(averageSpeed);
+                            }
+                        }
+
+                        document.getElementById('calc-mode').innerText = mode;
+                        lastPosition = pos;
                     },
-                    (err) => alert("Erreur GPS : " + err.message),
-                    { enableHighAccuracy: true, maximumAge: 0 }
+                    (err) => console.log("Erreur : " + err.message),
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
                 );
             }
         }
