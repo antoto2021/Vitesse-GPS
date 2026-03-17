@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speedo Pro - Compteur GPS</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --accent-color: #38bdf8;
+            --text-main: #f8fafc;
+            --danger: #ef4444;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #container {
+            text-align: center;
+            width: 100%;
+        }
+
+        .speed-value {
+            font-size: 10rem;
+            font-weight: 800;
+            line-height: 1;
+            margin: 0;
+            color: var(--accent-color);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .unit {
+            font-size: 2rem;
+            font-weight: 300;
+            text-transform: uppercase;
+            letter-spacing: 0.2rem;
+            margin-bottom: 2rem;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1rem 2rem;
+            border-radius: 1rem;
+            margin-top: 2rem;
+            display: inline-block;
+        }
+
+        .label {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+        }
+
+        .value {
+            font-weight: bold;
+            display: block;
+        }
+
+        #error-msg {
+            color: var(--danger);
+            position: fixed;
+            bottom: 20px;
+            padding: 0 20px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+
+        .btn-start {
+            background: var(--accent-color);
+            color: var(--bg-color);
+            border: none;
+            padding: 1rem 2rem;
+            font-weight: bold;
+            border-radius: 2rem;
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .btn-start:active { transform: scale(0.95); }
+        
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="setup">
+        <button class="btn-start" onclick="startTracking()">Lancer le compteur</button>
+    </div>
+
+    <div id="container" class="hidden">
+        <p class="speed-value" id="speed">0</p>
+        <p class="unit">km/h</p>
+
+        <div class="status-card">
+            <span class="label">Précision du signal</span>
+            <span class="value" id="accuracy">--</span>
+        </div>
+    </div>
+
+    <div id="error-msg"></div>
+
+    <script>
+        const speedElement = document.getElementById('speed');
+        const accuracyElement = document.getElementById('accuracy');
+        const errorElement = document.getElementById('error-msg');
+        const container = document.getElementById('container');
+        const setup = document.getElementById('setup');
+
+        let watchId = null;
+
+        function startTracking() {
+            if (!("geolocation" in navigator)) {
+                showError("Votre navigateur ne supporte pas la géolocalisation.");
+                return;
+            }
+
+            setup.classList.add('hidden');
+            container.classList.remove('hidden');
+
+            // Options pour maximiser la performance et la précision
+            const options = {
+                enableHighAccuracy: true, // Force l'utilisation du hardware GPS
+                maximumAge: 0,            // Pas de mise en cache
+                timeout: 5000             // Temps max d'attente du signal
+            };
+
+            watchId = navigator.geolocation.watchPosition(updatePosition, handleError, options);
+        }
+
+        function updatePosition(position) {
+            // La vitesse est fournie en m/s par l'API
+            // Formule : $$V_{km/h} = V_{m/s} \times 3.6$$
+            const speedMS = position.coords.speed;
+            const accuracy = position.coords.accuracy;
+
+            // Mise à jour de la vitesse
+            if (speedMS !== null && speedMS > 0) {
+                const speedKMH = Math.round(speedMS * 3.6);
+                speedElement.innerText = speedKMH;
+            } else {
+                speedElement.innerText = "0";
+            }
+
+            // Mise à jour de la précision (marge d'erreur en mètres)
+            if (accuracy !== null) {
+                accuracyElement.innerText = `± ${Math.round(accuracy)} m`;
+                
+                // Indicateur visuel de fiabilité
+                accuracyElement.style.color = accuracy > 20 ? '#ef4444' : '#22c55e';
+            }
+            
+            errorElement.innerText = ""; // Effacer les erreurs si on reçoit des données
+        }
+
+        function handleError(error) {
+            let message = "";
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    message = "Veuillez autoriser l'accès au GPS.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    message = "Signal GPS indisponible.";
+                    break;
+                case error.TIMEOUT:
+                    message = "Le signal a expiré. Vérifiez votre connexion.";
+                    break;
+                default:
+                    message = "Une erreur inconnue est survenue.";
+            }
+            showError(message);
+        }
+
+        function showError(msg) {
+            errorElement.innerText = msg;
+        }
+    </script>
+</body>
+</html>
