@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Speedo TGV Mode</title>
+    <title>Speedo Réactif</title>
     <style>
         :root { --bg: #0f172a; --accent: #38bdf8; --text: #f8fafc; }
         body { margin: 0; background: var(--bg); color: var(--text); font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
@@ -40,18 +40,18 @@
     <script>
         let lastPosition = null;
         let speedHistory = [];
-        const HISTORY_SIZE = 5; // On fait la moyenne sur les 5 dernières mesures
+        // On réduit l'historique à 2 pour plus de nervosité
+        const HISTORY_SIZE = 2; 
 
-        // Formule mathématique de Haversine pour calculer la distance entre 2 points GPS
         function calculateDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371; // Rayon de la terre en km
+            const R = 6371;
             const dLat = (lat2 - lat1) * Math.PI / 180;
             const dLon = (lon2 - lon1) * Math.PI / 180;
             const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
                       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
                       Math.sin(dLon/2) * Math.sin(dLon/2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c; // Retourne la distance en kilomètres
+            return R * c; 
         }
 
         function init() {
@@ -66,14 +66,16 @@
                         
                         let currentSpeed = 0;
                         let mode = "";
+                        let useSmoothing = true;
 
-                        // Si la précision est acceptable et que l'appareil donne une vitesse
-                        if (accuracy < 100 && pos.coords.speed !== null) {
+                        // Si le signal est excellent (GPS pur)
+                        if (accuracy < 30 && pos.coords.speed !== null) {
                             currentSpeed = pos.coords.speed * 3.6;
                             mode = "Vitesse GPS Directe";
                             document.getElementById('calc-mode').style.color = "#22c55e";
+                            useSmoothing = false; // Pas besoin de lisser un bon signal !
                         } 
-                        // Sinon, on calcule manuellement la vitesse avec la distance (Mode TGV/Dégradé)
+                        // Si le signal est moyen/mauvais (Triangulation 4G en TGV)
                         else if (lastPosition) {
                             const distanceKm = calculateDistance(
                                 lastPosition.coords.latitude, lastPosition.coords.longitude,
@@ -84,27 +86,30 @@
                             if (timeHours > 0) {
                                 currentSpeed = distanceKm / timeHours;
                             }
-                            mode = "Calcul par Triangulation (Lissé)";
+                            mode = "Triangulation (Lissage rapide)";
                             document.getElementById('calc-mode').style.color = "#f59e0b";
+                            useSmoothing = true;
                         }
 
-                        // Lissage : on ajoute la vitesse au tableau
-                        if (currentSpeed > 0 || speedHistory.length > 0) {
-                            speedHistory.push(currentSpeed);
-                        }
-                        
-                        // On garde seulement les X dernières mesures
-                        if (speedHistory.length > HISTORY_SIZE) {
-                            speedHistory.shift();
-                        }
-
-                        // Calcul de la moyenne glissante
-                        if (speedHistory.length > 0) {
-                            const averageSpeed = speedHistory.reduce((a, b) => a + b) / speedHistory.length;
-                            
-                            // Sécurité anti-aberrations : on ignore les vitesses impossibles (> 400km/h)
-                            if (averageSpeed < 400) {
-                                document.getElementById('speed').innerText = Math.round(averageSpeed);
+                        // Logique d'affichage
+                        if (!useSmoothing) {
+                            // Affichage instantané
+                            document.getElementById('speed').innerText = Math.round(currentSpeed);
+                            speedHistory = []; // On vide l'historique
+                        } else {
+                            // Affichage avec lissage léger
+                            if (currentSpeed > 0 || speedHistory.length > 0) {
+                                speedHistory.push(currentSpeed);
+                            }
+                            if (speedHistory.length > HISTORY_SIZE) {
+                                speedHistory.shift();
+                            }
+                            if (speedHistory.length > 0) {
+                                const averageSpeed = speedHistory.reduce((a, b) => a + b) / speedHistory.length;
+                                // Sécurité : on ignore les sauts délirants au-dessus de 400 km/h (un TGV ne dépasse pas 320 km/h en usage commercial)
+                                if (averageSpeed <= 400) {
+                                    document.getElementById('speed').innerText = Math.round(averageSpeed);
+                                }
                             }
                         }
 
